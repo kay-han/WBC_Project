@@ -1,4 +1,4 @@
-# Wisconsin Breast Cancer Data Analysis Project
+# Wisconsin Breast Cancer Data Analysis Project (November 2021)
 (1) Applying Logistic Regression to analyze 699 observations consisting of 11 attributes <br>
 (2) Class attribute indicates Benign or Malignant <br>
 ▪Benign: A tumor which can usually be removed without serious complications and will not be fatal to the patient. <br>
