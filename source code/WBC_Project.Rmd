@@ -1,1 +1,356 @@
 
+---
+title: "Wisconsin Breast Cancer Data Analysis"
+author: "Kay Han"
+date: "11/29/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+   echo = TRUE, 
+   fig.align = 'center' , 
+   out.width="50%"
+)
+```
+
+
+##  Packages
+
+```{r message=FALSE}
+library(tidyverse)  # includes tibbles, ggplot2, dplyr, and more. 
+library(caret)      # analyzes variable importance
+library(MLmetrics)
+library(MASS)
+library(ROCR)
+```
+
+
+In addition, I'd like to ask `R` to print decimal numbers with 2 digits:
+```{r}
+options(scipen=2)
+```
+
+
+----- 
+
+
+# About the Project
+
+It is obtained from the University of Wisconsin Hospitals in 1992 and collected 699 observations consisting of 11 attributes.
+The features are computed from a digitized image.
+
+
+Load  this data set and store it as `CancerData`,  using the following code: 
+```{r}
+CancerData<-read_csv("http://archive.ics.uci.edu/ml/machine-learning-databases/breast-cancer-wisconsin/breast-cancer-wisconsin.data", col_names=FALSE, na="?")
+```
+
+
+```{r}
+glimpse(CancerData)
+```
+
+```{r}
+#Name columns
+names(CancerData) <- c('id', 'thickness', 'unif_cell_size','unif_cell_shape','marginal_adhesion','cell_size','bare_nuclei','band_chromatin','normal_nucleoli','mitoses','class')
+CancerData <- CancerData %>% dplyr::select(-id) #Remove ID column
+summary(CancerData)  #Check out if there are any NA data
+```
+
+```{r}
+# remove missing values from bare_nuclei
+CancerData$bare_nuclei[is.na(CancerData$bare_nuclei)] <- median(CancerData$bare_nuclei, na.rm = TRUE)
+```
+
+
+> It changes from value 2 to Benign and from value 4 to Malignant.
+
+```{r}
+CancerData$class <- factor(ifelse(CancerData$class==2,"Benign","Malignant"))
+```
+
+```{r}
+#confirm the result of changes
+summary(CancerData)
+glimpse(CancerData)
+str(CancerData)
+```
+## Basic Data Visualization
+
+```{r}
+# Confirm the changed values of class
+view(head(CancerData))
+```
+
+
+### Data Visualization
+
+```{r}
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...){
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+```
+
+
+
+
+```{r}
+hist_cancerclass <- CancerData %>% ggplot(aes(class)) +
+  geom_bar(fill="yellow",colour="brown") +
+  geom_text(stat='Count',aes(label=..count..),vjust=-0.2) +
+  ggtitle("Class Distribution")
+hist_cancerclass + theme(text=element_text(size=15))
+```
+
+```{r}
+#standardizing thickness
+thickness_scale <- scale(CancerData$thickness)
+
+
+hist(CancerData$thickness, breaks=seq(0,10,by=1), labels=TRUE, xlab="A Tumor's Thickness", ylab="Count", main="The Distribution of a Tumor's Thickness", col=rainbow(100)[45:100])
+```
+
+```{r}
+boxplot_cellsize <- CancerData %>% ggplot(aes(class, unif_cell_size)) +
+  geom_jitter(col='skyblue') +
+  geom_boxplot(alpha=.5)
+boxplot_cellsize
+```
+> To start with an exploration of the dataset, I look at boxplots of all attributes combined.
+
+### Generation of the Training and Test Sets
+
+```{r}
+# Generate samples of two groups, train and test set: 80% train, 20% test
+sample(1:2,100, replace=T, prob=c(0.8,0.2))
+idx <- sample(1:NROW(CancerData), 400)
+TrainingSet <- CancerData[idx,]
+TestSet <- CancerData[-idx,]
+
+table(CancerData$class)
+table(TrainingSet$class)
+table(TestSet$class)
+```
+
+
+
+```{r}
+summary(TrainingSet)
+summary(TestSet)
+```
+
+> Calculate the proportional ratio of each groups. \
+
+```{r}
+TrainingSet_labels <- TrainingSet[,10]
+TestSet_labels <- TestSet[,10]
+TrainingSet_labels
+
+# Checking the balance of our Response Variable
+round(prop.table(table(CancerData$class)),2)
+
+#check out proportion of training and test sets
+round(prop.table(table(TrainingSet_labels)*100),2)
+round(prop.table(table(TestSet_labels)*100),2)
+```
+
+> The scatterplot matrix for the correlation about the predictors and response. \
+
+```{r}
+pairs(CancerData %>% sample_n(min(1000, nrow(CancerData))), lower.panel=function(x,y){ points(x,y); abline(0, 1, col='red')}, upper.panel = panel.cor)
+```
+
+> It provieds the Mitoese has many significant outliers. 
+
+
+```{r}
+ggplot(stack(TrainingSet[,1:9]), aes(x = ind, y = values)) + geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust=1)) +
+  labs(title = "Boxplots of All Attributes") + labs(x = "", y = "Values") + 
+  scale_y_continuous(breaks = seq(1, 10, by = 1))
+```
+
+> Distribution of thickness belonging to each class. \
+
+```{r}
+table(TrainingSet$thickness, TrainingSet$class)
+```
+
+
+```{r}
+table(TrainingSet$bare_nuclei, TrainingSet$class)
+```
+
+
+> The relation between uniformiy cell size and thickness \
+
+```{r}
+fitlm <- lm(formula = unif_cell_size ~ thickness, data=CancerData)
+summary(fitlm)
+```
+
+> The relationship between bare_nuclei and thickness \
+
+```{r}
+fitlm <- lm(formula = bare_nuclei ~ thickness, data=CancerData)
+summary(fitlm)
+#plot(fitlm)
+plot(CancerData$thickness, CancerData$class)
+abline(fitlm$coefficients, col="red")
+```
+
+###### Hypothesis Testing
+
+> $\alpha = 0.05$. \
+>  $H_0$ two means of thickness of two groups are same.
+>  $H_1$ there is a difference in means of thickness of two groups.
+
+> Data Extract \
+
+```{r}
+groupBenign <- CancerData[CancerData$class == 'Benign',]
+groupMalignant <- CancerData[CancerData$class == 'Malignant',]
+```
+
+
+```{r}
+groupBenign
+```
+
+
+```{r}
+groupMalignant
+```
+
+> I used the f-test to compare the variances from two independent groups at 95% of a confident level. From the result, the p-value is much smaller than $\alpha = 0.05$. \
+> Therefore, reject $H_0$ and select alternative hypothesis $H_1$ which means  there is a difference in variances of `thickness` in the 'Benign' and 'Malignant' groups. \
+> Two samples are independent and I assume normally distributed populations since two samples of sizes are greater than 30 respectively. \
+
+
+```{r}
+var.test(groupBenign$thickness, groupMalignant$thickness)
+```
+
+> Based on the result from the F-test, I conducted a T-test. \
+
+```{r}
+t.test(groupBenign$thickness, groupMalignant$thickness, var.equal = FALSE)
+```
+
+> Since P-value 2.2e-16 is much smaller than $\alpha = 0.05$, Reject $H_0$ and select $H_1$. From the T-test, I found that the means of two groups are significantly different, 2.96 and 7.2 respectively for Benign and Malignant groups. \
+> I can say that a woman would have thicker tumor than a benign tumor if she has a malignant tumor. \ 
+
+
+###### Logistic Regression 
+
+```{r}
+glm.fit <- glm(class~., data=TrainingSet, family = binomial)
+summary(glm.fit)
+```
+> Backward Elimination Approach \
+> It will remove a variable having the biggest p-value then I will see the model fit again. \
+
+```{r}
+# First backward to compare the model fit
+glm.fit.backward <- glm(class~ thickness+unif_cell_size+unif_cell_shape+marginal_adhesion+bare_nuclei+band_chromatin+normal_nucleoli+mitoses, data = TrainingSet, family = binomial)
+summary(glm.fit.backward)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(glm.fit)
+```
+
+
+###### Prediction
+
+```{r}
+yield_glm <- predict(glm.fit, newdata = TestSet[1:5,], type='response')
+yield_glm
+```
+
+```{r}
+summary(yield_glm)
+```
+
+
+```{r}
+yield_glm <- predict(glm.fit, newdata = TestSet, type='response')
+summary(yield_glm)
+```
+
+
+> The Importance of Variables
+
+```{r}
+varImp(glm.fit)
+```
+
+
+
+```{r}
+# par(mfrow=c(2,3))
+# plot(fitlm)
+```
+
+
+
+###### Evaluation
+
+
+```{r}
+
+MAE(y_pred = yield_glm, y_true = as.numeric(TestSet$class))
+```
+```{r}
+MSE(y_pred = yield_glm, y_true = as.numeric(TestSet$class))
+```
+
+> MAE and MSE after Stepwise Regression Test: Backward \
+
+```{r}
+yield_glm_backward <- predict(glm.fit.backward, newdata = TestSet, type='response')
+MAE(y_pred = yield_glm_backward, y_true = as.numeric(TestSet$class))
+```
+
+```{r}
+MSE(y_pred = yield_glm_backward, y_true = as.numeric(TestSet$class))
+```
+
+
+
+```{r}
+glm.probs <- predict(glm.fit, TestSet, type="response")
+glm.probs[1:20]
+```
+
+```{r}
+glm.predict <- rep(0, NROW(TestSet))
+glm.predict[glm.probs > .5] = 1
+glm.predict[1:20]
+```
+
+```{r}
+predictions <- prediction(glm.probs, TestSet$class)
+t_performance <- performance(predictions, measure = "tpr", x.measure = "fpr")
+performance(predictions, "auc")@y.values[[1]]
+```
+
+> The Model Accuracy
+
+```{r}
+modelFit <- train(class~., data=TrainingSet, method="glm")
+predictions <- predict(modelFit, newdata=TestSet)
+confusionMatrix(predictions, TestSet$class)
+```
+
